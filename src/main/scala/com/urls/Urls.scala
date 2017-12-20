@@ -41,9 +41,9 @@ object UrlProcessor {
   case class UrlFailed(url: String, t: Throwable)
   case object WriteResults
 
-  def props(input: File) = Props(classOf[UrlProcessor], input)
+  def props(input: File) = Props(classOf[UrlProcessor], input.nameWithoutExtension)
 }
-class UrlProcessor(input: File) extends Actor with ActorLogging {
+class UrlProcessor(inputFile: String) extends Actor with ActorLogging {
   val OUTPUT_DIR = ("temp" / "urls" / "output").createDirectories()
   implicit val ec = context.system.dispatcher
 
@@ -63,26 +63,29 @@ class UrlProcessor(input: File) extends Actor with ActorLogging {
       Future.sequence(fs)
 
     case UrlDone(url, wordCount) =>
-      log.debug(s"processed $url from ${input.nameWithoutExtension} - $wordCount words")
+      log.debug(s"processed $url from $inputFile - $wordCount words")
       updateWithCount(url, wordCount)
 
     case UrlFailed(url, t) =>
       updateWithCount(url, -1)
-      log.warning(s"failure with processing url $url of file $input - ${t.getMessage}")
+      log.warning(s"failure with processing url $url of file $inputFile - ${t.getMessage}")
 
     case WriteResults =>
-      val outputFile = OUTPUT_DIR.createChild(s"${input.nameWithoutExtension}-output")
+      val outputFile = OUTPUT_DIR.createChild(s"$inputFile-output")
       processingUrls.map { case (url, wordCount) =>
         outputFile.appendLine(s"$url - $wordCount")
       }
+      context.stop(self)
     case _ =>
   }
+
+  override def postStop() = log.info(s"UrlProcessor for $inputFile is down")
 
   def updateWithCount(url: String, wordCount: Int) = {
     processingUrls = processingUrls :+ (url, wordCount)
 
     if (processingUrls.lengthCompare(urlCount) == 0) {
-      log.info(s"done with file $input")
+      log.info(s"done with file $inputFile")
       self ! WriteResults
     }
   }
